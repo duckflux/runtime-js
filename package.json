@@ -1,0 +1,30 @@
+{
+  "name": "@duckflux/runner",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./parser": "./src/parser/index.ts",
+    "./cel": "./src/cel/index.ts",
+    "./engine": "./src/engine/index.ts"
+  },
+  "bin": {
+    "duckflux": "src/cli/main.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "start": "bun src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.10",
+    "@types/node": "^25.3.5",
+    "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "ajv": "^8.12.0",
+    "ajv-formats": "^2.1.1",
+    "cel-js": "^0.8.2",
+    "yaml": "^2.2.1"
+  }
+}
