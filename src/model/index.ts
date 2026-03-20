@@ -91,7 +91,11 @@ export interface WaitStep {
   };
 }
 
-export type FlowStep = string | FlowStepOverride | LoopStep | ParallelStep | IfStep | WaitStep | InlineParticipant;
+export interface SetStep {
+  set: Record<string, string>;
+}
+
+export type FlowStep = string | FlowStepOverride | LoopStep | ParallelStep | IfStep | WaitStep | SetStep | InlineParticipant;
 
 export interface FlowStepOverride {
   [participantName: string]: {

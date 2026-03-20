@@ -2,7 +2,7 @@
 
 JavaScript/TypeScript runtime for [duckflux](https://duckflux.dev) workflows. Dual-purpose: **CLI tool** and **importable library**.
 
-Spec version: **v0.3**
+Spec version: **v0.4**
 
 ## Installation
 
@@ -90,8 +90,9 @@ import { executeWorkflow } from "@duckflux/runtime/engine";
 import { createHub, MemoryHub } from "@duckflux/runtime/eventhub";
 ```
 
-## Spec v0.3 Features
+## Spec v0.4 Features
 
+- **`set` construct** — write values to `execution.context` via CEL expressions; a flow-level control operation transparent to the I/O chain
 - **Inline participants** — define steps directly in the flow without a `participants` block
 - **Anonymous inline** — omit `as` for unnamed steps; output accessible only via implicit I/O chain
 - **Implicit I/O chain** — step output automatically flows as input to the next step

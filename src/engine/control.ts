@@ -28,6 +28,23 @@ export async function executeControlStep(
     return executeWait(state, (obj as { wait: Record<string, unknown> }).wait, chain);
   }
 
+  // Set step — write values to execution.context
+  if ("set" in obj && Object.keys(obj).length === 1) {
+    const setDef = (obj as { set: Record<string, string> }).set;
+    const ctx = state.toCelContext();
+
+    if (!state.executionMeta.context) {
+      state.executionMeta.context = {};
+    }
+
+    for (const [key, expr] of Object.entries(setDef)) {
+      state.executionMeta.context[key] = evaluateCel(expr, ctx);
+    }
+
+    // set does not produce output; chain passes through unchanged
+    return chain;
+  }
+
   // Loop step
   if ("loop" in obj && Object.keys(obj).length === 1) {
     const loopDef = (obj as { loop: { as?: string; until?: string; max?: number | string; steps: unknown[] } }).loop;
