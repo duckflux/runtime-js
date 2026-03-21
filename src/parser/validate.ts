@@ -142,6 +142,17 @@ function validateFlowCel(flow: unknown[], errors: ValidationError[], basePath = 
       continue;
     }
 
+    // Set step CEL
+    if ("set" in obj && Object.keys(obj).length === 1) {
+      const setDef = obj.set as Record<string, string>;
+      for (const [key, expr] of Object.entries(setDef)) {
+        if (typeof expr === "string") {
+          validateCel(expr, errors, `${stepPath}.set.${key}`);
+        }
+      }
+      continue;
+    }
+
     if (obj.loop) {
       const loopDef = obj.loop as Record<string, unknown>;
       if (loopDef.until && typeof loopDef.until === "string") {
