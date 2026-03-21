@@ -19,8 +19,8 @@ const notImplemented = (type: string): ExecutorFunction => {
 };
 
 const executors: Record<string, ExecutorFunction> = {
-  exec: async (participant, input, env) => executeExec(participant, input, env),
-  http: async (participant, input) => executeHttp(participant, input as string | undefined),
+  exec: async (participant, input, env) => executeExec(participant as Parameters<typeof executeExec>[0], input, env),
+  http: async (participant, input) => executeHttp(participant as Parameters<typeof executeHttp>[0], input as string | undefined),
   workflow: async (participant, input, _env, basePath, engineExecutor) => {
     if (!basePath) {
       throw new Error("workflow participant execution requires basePath");
