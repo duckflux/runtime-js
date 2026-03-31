@@ -1,38 +1,212 @@
-name: Release
+name: CI Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
 
 jobs:
-  release-binaries:
-    name: Compile & publish GitHub Release
+  # ── 1. Detect which packages changed ────────────────────────────────────────
+  detect-changes:
+    name: Detect changed packages
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    outputs:
+      core:      ${{ steps.filter.outputs.core }}
+      runner:    ${{ steps.filter.outputs.runner }}
+      cli:       ${{ steps.filter.outputs.cli }}
+      hub-nats:  ${{ steps.filter.outputs.hub-nats }}
+      hub-redis: ${{ steps.filter.outputs.hub-redis }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            core:
+              - 'packages/core/**'
+            runner:
+              - 'packages/runner/**'
+            cli:
+              - 'packages/cli/**'
+            hub-nats:
+              - 'packages/hub-nats/**'
+            hub-redis:
+              - 'packages/hub-redis/**'
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+  # ── 2. Publish @duckflux/core ───────────────────────────────────────────────
+  publish-core:
+    name: Publish @duckflux/core
+    needs: detect-changes
+    if: needs.detect-changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Build @duckflux/core (JS only, skip tsc)
+        # Build all sub-path entrypoints so that @duckflux/runner can bundle them
+        run: >
+          bun build
+          src/index.ts
+          src/parser/index.ts
+          src/cel/index.ts
+          src/engine/index.ts
+          src/eventhub/index.ts
+          --outdir dist --target node --format esm
+        working-directory: packages/core
+
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish if version is new
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@duckflux/core@${VERSION}" &>/dev/null; then
+            echo "@duckflux/core@${VERSION} already published — skipping"
+          else
+            npm publish --access public --ignore-scripts
+          fi
+        working-directory: packages/core
+
+  # ── 3. Publish @duckflux/runner ─────────────────────────────────────────────
+  # Runs when core OR runner changes. Waits for publish-core (may be skipped).
+  publish-runner:
+    name: Publish @duckflux/runner
+    needs: [detect-changes, publish-core]
+    if: |
+      always() &&
+      needs.detect-changes.result == 'success' &&
+      (needs.publish-core.result == 'success' || needs.publish-core.result == 'skipped') &&
+      (needs.detect-changes.outputs.core == 'true' || needs.detect-changes.outputs.runner == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build @duckflux/core (JS only, needed by runner bundler)
+        run: >
+          bun build
+          src/index.ts
+          src/parser/index.ts
+          src/cel/index.ts
+          src/engine/index.ts
+          src/eventhub/index.ts
+          --outdir dist --target node --format esm
+        working-directory: packages/core
+
+      - name: Build @duckflux/runner (JS only, skip tsc)
+        run: |
+          bun build src/main.ts --outdir dist --target node --format esm --banner '#!/usr/bin/env node'
+          chmod +x dist/main.js
+        working-directory: packages/runner
+
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish if version is new
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@duckflux/runner@${VERSION}" &>/dev/null; then
+            echo "@duckflux/runner@${VERSION} already published — skipping"
+          else
+            npm publish --access public --ignore-scripts
+          fi
+        working-directory: packages/runner
+
+  # ── 4. Publish duckflux (thin CLI wrapper) ──────────────────────────────────
+  # Runs when core OR runner OR cli changes. Waits for publish-runner (may be skipped).
+  publish-cli:
+    name: Publish duckflux
+    needs: [detect-changes, publish-runner]
+    if: |
+      always() &&
+      needs.detect-changes.result == 'success' &&
+      (needs.publish-runner.result == 'success' || needs.publish-runner.result == 'skipped') &&
+      (
+        needs.detect-changes.outputs.core    == 'true' ||
+        needs.detect-changes.outputs.runner  == 'true' ||
+        needs.detect-changes.outputs.cli     == 'true'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish if version is new
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "duckflux@${VERSION}" &>/dev/null; then
+            echo "duckflux@${VERSION} already published — skipping"
+          else
+            npm publish --access public --ignore-scripts
+          fi
+        working-directory: packages/cli
+
+  # ── 5. Compile & publish GitHub Release (binaries) ──────────────────────────
+  # Runs when core OR runner changes. Creates a release only if the version tag
+  # doesn't exist yet — idempotent on repeated commits without version bump.
+  release-binaries:
+    name: Compile & publish GitHub Release
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.core == 'true' ||
+      needs.detect-changes.outputs.runner == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check if release already exists for this version
+        id: version-check
+        run: |
+          VERSION=$(node -p "require('./packages/runner/package.json').version")
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          if gh release view "v${VERSION}" &>/dev/null; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Release v${VERSION} already exists — skipping"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Compile all platform binaries
+        if: steps.version-check.outputs.skip == 'false'
         run: bun run compile
         working-directory: packages/runner
 
       - name: Create GitHub Release and upload binaries
+        if: steps.version-check.outputs.skip == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          name: "duckflux JS runtime ${{ github.ref_name }}"
+          tag_name: v${{ steps.version-check.outputs.version }}
+          name: "duckflux JS runtime v${{ steps.version-check.outputs.version }}"
           body: |
-            ## duckflux JS runtime ${{ github.ref_name }}
+            ## duckflux JS runtime v${{ steps.version-check.outputs.version }}
 
             ### Standalone binaries (no Bun/Node required)
 
@@ -62,41 +236,72 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  publish-npm:
-    name: Publish to npm
+  # ── 6. Publish @duckflux/hub-nats ───────────────────────────────────────────
+  # hub-nats uses @duckflux/core as peerDep (not bundled), so it doesn't need
+  # to wait for publish-core. Only publishes when hub-nats files themselves change.
+  publish-hub-nats:
+    name: Publish @duckflux/hub-nats
+    needs: detect-changes
+    if: needs.detect-changes.outputs['hub-nats'] == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build @duckflux/core (JS only, no type declarations needed for bundling)
-        run: bun build src/index.ts src/parser/index.ts src/cel/index.ts src/engine/index.ts src/eventhub/index.ts --outdir dist --target node --format esm
-        working-directory: packages/core
-
-      - name: Build @duckflux/runner (JS only, skip tsc)
-        run: |
-          bun build src/main.ts --outdir dist --target node --format esm --banner '#!/usr/bin/env node'
-          chmod +x dist/main.js
-        working-directory: packages/runner
+      - name: Build @duckflux/hub-nats (JS only, skip tsc)
+        run: bun build src/index.ts --outdir dist --target node --format esm
+        working-directory: packages/hub-nats
 
       - name: Configure npm auth
         run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @duckflux/runner
-        run: npm publish --access public --ignore-scripts
-        working-directory: packages/runner
+      - name: Publish if version is new
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@duckflux/hub-nats@${VERSION}" &>/dev/null; then
+            echo "@duckflux/hub-nats@${VERSION} already published — skipping"
+          else
+            npm publish --access public --ignore-scripts
+          fi
+        working-directory: packages/hub-nats
 
-      - name: Publish duckflux (thin CLI wrapper)
-        run: npm publish --access public --ignore-scripts
-        working-directory: packages/cli
-        # @duckflux/runner must be published first so npm can resolve the dependency
+  # ── 7. Publish @duckflux/hub-redis ──────────────────────────────────────────
+  publish-hub-redis:
+    name: Publish @duckflux/hub-redis
+    needs: detect-changes
+    if: needs.detect-changes.outputs['hub-redis'] == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build @duckflux/hub-redis (JS only, skip tsc)
+        run: bun build src/index.ts --outdir dist --target node --format esm
+        working-directory: packages/hub-redis
+
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish if version is new
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "@duckflux/hub-redis@${VERSION}" &>/dev/null; then
+            echo "@duckflux/hub-redis@${VERSION} already published — skipping"
+          else
+            npm publish --access public --ignore-scripts
+          fi
+        working-directory: packages/hub-redis
