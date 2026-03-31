@@ -77,6 +77,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Build @duckflux/core
+        run: bun run --filter @duckflux/core build
+
       - name: Build @duckflux/runner
         run: bun run --filter @duckflux/runner build
 
