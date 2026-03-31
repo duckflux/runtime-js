@@ -78,7 +78,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build @duckflux/core (JS only, no type declarations needed for bundling)
-        run: bun build src/index.ts --outdir dist --target node --format esm
+        run: bun build src/index.ts src/parser/index.ts src/cel/index.ts src/engine/index.ts src/eventhub/index.ts --outdir dist --target node --format esm
         working-directory: packages/core
 
       - name: Build @duckflux/runner
