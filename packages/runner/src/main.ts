@@ -30,6 +30,8 @@ if (import.meta.main) {
       "nats-stream": { type: "string", default: "duckflux-events" },
       "redis-addr": { type: "string", default: "localhost:6379" },
       "redis-db": { type: "string", default: "0" },
+      "trace-dir": { type: "string" },
+      "trace-format": { type: "string", default: "json" },
     },
     allowPositionals: true,
   });

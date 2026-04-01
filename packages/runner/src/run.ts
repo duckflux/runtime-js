@@ -133,6 +133,8 @@ export default async function runCommand(filePath?: string, cliValues?: CLIValue
     cwd: cliValues?.cwd as string | undefined,
     verbose: cliValues?.verbose as boolean | undefined,
     quiet: cliValues?.quiet as boolean | undefined,
+    traceDir: cliValues?.["trace-dir"] as string | undefined,
+    traceFormat: (cliValues?.["trace-format"] as "json" | "txt" | "sqlite" | undefined) ?? "json",
   };
 
   try {

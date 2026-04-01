@@ -181,3 +181,34 @@ export interface ValidationError {
   path: string;
   message: string;
 }
+
+export interface StepTrace {
+  seq: number;
+  name: string;
+  type: string;
+  startedAt: string;
+  finishedAt?: string;
+  duration?: number;
+  status: "success" | "failure" | "skipped";
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+  retries?: number;
+  loopIndex?: number;
+}
+
+export interface ExecutionTrace {
+  execution: {
+    id: string;
+    workflowId?: string;
+    workflowName?: string;
+    workflowVersion?: string | number;
+    startedAt: string;
+    finishedAt: string;
+    duration: number;
+    status: "success" | "failure" | "running";
+    inputs: unknown;
+    output: unknown;
+  };
+  steps: StepTrace[];
+}

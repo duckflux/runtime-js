@@ -33,14 +33,25 @@ export async function executeControlStep(
 
   // Wait step
   if ("wait" in obj && Object.keys(obj).length === 1) {
-    const { executeWait } = await import("./wait");
-    return executeWait(state, (obj as { wait: Record<string, unknown> }).wait, chain, hub, signal);
+    const loopIndex = state.isInsideLoop() ? state.currentLoopIndex() : undefined;
+    const traceSeq = state.tracer?.startStep("wait", "wait", undefined, loopIndex);
+    try {
+      const { executeWait } = await import("./wait");
+      const result = await executeWait(state, (obj as { wait: Record<string, unknown> }).wait, chain, hub, signal);
+      if (traceSeq !== undefined) state.tracer?.endStep(traceSeq, "success", result);
+      return result;
+    } catch (err) {
+      if (traceSeq !== undefined) state.tracer?.endStep(traceSeq, "failure", undefined, String((err as Error)?.message ?? err));
+      throw err;
+    }
   }
 
   // Set step — write values to execution.context
   if ("set" in obj && Object.keys(obj).length === 1) {
     const setDef = (obj as { set: Record<string, string> }).set;
     const ctx = state.toCelContext();
+    const loopIndex = state.isInsideLoop() ? state.currentLoopIndex() : undefined;
+    const traceSeq = state.tracer?.startStep("set", "set", setDef, loopIndex);
 
     if (!state.executionMeta.context) {
       state.executionMeta.context = {};
@@ -48,11 +59,13 @@ export async function executeControlStep(
 
     for (const [key, expr] of Object.entries(setDef)) {
       if (RESERVED_SET_KEYS.has(key)) {
+        if (traceSeq !== undefined) state.tracer?.endStep(traceSeq, "failure", undefined, `set key '${key}' uses a reserved name`);
         throw new Error(`set key '${key}' uses a reserved name`);
       }
       state.executionMeta.context[key] = evaluateCel(expr, ctx);
     }
 
+    if (traceSeq !== undefined) state.tracer?.endStep(traceSeq, "success", state.executionMeta.context);
     // set does not produce output; chain passes through unchanged
     return chain;
   }
@@ -75,6 +88,8 @@ export async function executeControlStep(
     }
 
     const hasMax = loopDef.max !== undefined;
+    const outerLoopIndex = state.isInsideLoop() ? state.currentLoopIndex() : undefined;
+    const loopTraceSeq = state.tracer?.startStep(loopAs ?? "loop", "loop", undefined, outerLoopIndex);
 
     state.pushLoop(loopAs);
     let loopChain = chain;
@@ -114,6 +129,10 @@ export async function executeControlStep(
         iterations += 1;
         state.incrementLoop();
       }
+      if (loopTraceSeq !== undefined) state.tracer?.endStep(loopTraceSeq, "success", loopChain);
+    } catch (err) {
+      if (loopTraceSeq !== undefined) state.tracer?.endStep(loopTraceSeq, "failure", undefined, String((err as Error)?.message ?? err));
+      throw err;
     } finally {
       state.popLoop();
     }
@@ -124,44 +143,62 @@ export async function executeControlStep(
   if ("parallel" in obj && Object.keys(obj).length === 1) {
     const parallelSteps = (obj as { parallel: unknown[] }).parallel;
     const controller = new AbortController();
+    const loopIndex = state.isInsideLoop() ? state.currentLoopIndex() : undefined;
+    const parallelTraceSeq = state.tracer?.startStep("parallel", "parallel", undefined, loopIndex);
     // Combine parent signal with local controller
     const branchSignal = signal
       ? AbortSignal.any([signal, controller.signal])
       : controller.signal;
 
-    const results = await Promise.all(
-      parallelSteps.map(async (parallelStep) => {
-        try {
-          // Each branch starts with the same incoming chain
-          return await executeControlStep(workflow, state, parallelStep, basePath, engineExecutor, chain, hub, branchSignal);
-        } catch (error) {
-          controller.abort();
-          throw error;
-        }
-      }),
-    );
+    try {
+      const results = await Promise.all(
+        parallelSteps.map(async (parallelStep) => {
+          try {
+            // Each branch starts with the same incoming chain
+            return await executeControlStep(workflow, state, parallelStep, basePath, engineExecutor, chain, hub, branchSignal);
+          } catch (error) {
+            controller.abort();
+            throw error;
+          }
+        }),
+      );
 
-    // Chain after parallel is ordered array of branch outputs
-    return results;
+      if (parallelTraceSeq !== undefined) state.tracer?.endStep(parallelTraceSeq, "success", results);
+      // Chain after parallel is ordered array of branch outputs
+      return results;
+    } catch (err) {
+      if (parallelTraceSeq !== undefined) state.tracer?.endStep(parallelTraceSeq, "failure", undefined, String((err as Error)?.message ?? err));
+      throw err;
+    }
   }
 
   // If step
   if ("if" in obj && Object.keys(obj).length === 1) {
     const ifDef = (obj as { if: { condition: string; then: unknown[]; else?: unknown[] } }).if;
     const condition = evaluateCel(ifDef.condition, state.toCelContext());
+    const loopIndex = state.isInsideLoop() ? state.currentLoopIndex() : undefined;
+    const ifTraceSeq = state.tracer?.startStep("if", "if", { condition: ifDef.condition }, loopIndex);
 
     if (typeof condition !== "boolean") {
+      if (ifTraceSeq !== undefined) state.tracer?.endStep(ifTraceSeq, "failure", undefined, `if.condition must evaluate to boolean, got ${typeof condition}`);
       throw new Error(`if.condition must evaluate to boolean, got ${typeof condition}`);
     }
 
-    if (condition) {
-      return executeSequential(workflow, state, ifDef.then, basePath, engineExecutor, chain, hub, signal);
-    } else if (ifDef.else) {
-      return executeSequential(workflow, state, ifDef.else, basePath, engineExecutor, chain, hub, signal);
+    try {
+      let result: unknown;
+      if (condition) {
+        result = await executeSequential(workflow, state, ifDef.then, basePath, engineExecutor, chain, hub, signal);
+      } else if (ifDef.else) {
+        result = await executeSequential(workflow, state, ifDef.else, basePath, engineExecutor, chain, hub, signal);
+      } else {
+        result = chain;
+      }
+      if (ifTraceSeq !== undefined) state.tracer?.endStep(ifTraceSeq, "success", result);
+      return result;
+    } catch (err) {
+      if (ifTraceSeq !== undefined) state.tracer?.endStep(ifTraceSeq, "failure", undefined, String((err as Error)?.message ?? err));
+      throw err;
     }
-
-    // False without else: chain passes through
-    return chain;
   }
 
   // Inline participant (has `type` field) or participant override

@@ -6,6 +6,7 @@ import { validateSchema } from "../parser/schema";
 import { validateSemantic } from "../parser/validate";
 import { validateInputs } from "../parser/validate_inputs";
 import type { WorkflowEngineExecutor } from "../participant/workflow";
+import { TraceCollector, createTraceWriter } from "../tracer/index";
 import { executeControlStep } from "./control";
 import { validateOutputSchema } from "./output";
 import { WorkflowState } from "./state";
@@ -23,6 +24,10 @@ export interface ExecuteOptions {
   executionNumber?: number;
   verbose?: boolean;
   quiet?: boolean;
+  /** Directory to write trace files; one file per execution named <executionId>.<ext> */
+  traceDir?: string;
+  /** Trace output format (default: "json") */
+  traceFormat?: "json" | "txt" | "sqlite";
   /** @internal Tracks ancestor workflow paths for circular detection */
   _ancestorPaths?: Set<string>;
 }
@@ -51,11 +56,28 @@ export async function executeWorkflow(
     state.executionMeta.cwd = options.cwd;
   }
 
-  const startedAt = performance.now();
+  const startedAtMs = performance.now();
+  const startedAtIso = state.executionMeta.startedAt;
 
   // Propagate ancestor paths for circular sub-workflow detection
   if (options._ancestorPaths) {
     state.ancestorPaths = options._ancestorPaths;
+  }
+
+  // Set up incremental tracing if requested (only on the root workflow, not sub-workflows)
+  if (options.traceDir && !options._ancestorPaths) {
+    const collector = new TraceCollector();
+    const writer = await createTraceWriter(options.traceDir, options.traceFormat ?? "json");
+    collector.writer = writer;
+    state.tracer = collector;
+    await writer.open({
+      id: state.executionMeta.id,
+      workflowId: workflow.id,
+      workflowName: workflow.name,
+      workflowVersion: workflow.version,
+      startedAt: startedAtIso,
+      inputs: resolved,
+    });
   }
 
   const engineExecutor: WorkflowEngineExecutor = async (subWorkflow, subInputs, subBasePath) => {
@@ -66,43 +88,56 @@ export async function executeWorkflow(
     });
   };
 
-  // Execute flow with chain threading
-  let chain: unknown;
-  for (const step of workflow.flow) {
-    chain = await executeControlStep(workflow, state, step, basePath, engineExecutor, chain, options.hub);
-  }
-
-  // Output resolution
   let output: unknown;
-  if (workflow.output !== undefined) {
-    output = state.resolveOutput(workflow.output, evaluateCel);
+  let success = false;
 
-    // Validate output against schema if defined
-    if (
-      typeof workflow.output === "object" &&
-      "schema" in workflow.output &&
-      "map" in workflow.output &&
-      typeof output === "object" &&
-      output !== null
-    ) {
-      validateOutputSchema(workflow.output.schema, output as Record<string, unknown>);
+  try {
+    // Execute flow with chain threading
+    let chain: unknown;
+    for (const step of workflow.flow) {
+      chain = await executeControlStep(workflow, state, step, basePath, engineExecutor, chain, options.hub);
     }
-  } else {
-    // Default: return final chain value
-    output = chain;
+
+    // Output resolution
+    if (workflow.output !== undefined) {
+      output = state.resolveOutput(workflow.output, evaluateCel);
+
+      // Validate output against schema if defined
+      if (
+        typeof workflow.output === "object" &&
+        "schema" in workflow.output &&
+        "map" in workflow.output &&
+        typeof output === "object" &&
+        output !== null
+      ) {
+        validateOutputSchema(workflow.output.schema, output as Record<string, unknown>);
+      }
+    } else {
+      // Default: return final chain value
+      output = chain;
+    }
+
+    const steps = state.getAllResults();
+    success = !Object.values(steps).some((step) => step.status === "failure");
+    state.executionMeta.status = success ? "success" : "failure";
+
+    return {
+      success,
+      output,
+      steps,
+      duration: Math.max(0, performance.now() - startedAtMs),
+    };
+  } finally {
+    if (state.tracer?.writer) {
+      const duration = Math.max(0, performance.now() - startedAtMs);
+      await state.tracer.writer.finalize({
+        status: success ? "success" : "failure",
+        output: output ?? null,
+        finishedAt: new Date().toISOString(),
+        duration,
+      }).catch(() => {});
+    }
   }
-
-  const steps = state.getAllResults();
-  const success = !Object.values(steps).some((step) => step.status === "failure");
-
-  state.executionMeta.status = success ? "success" : "failure";
-
-  return {
-    success,
-    output,
-    steps,
-    duration: Math.max(0, performance.now() - startedAt),
-  };
 }
 
 export async function runWorkflowFromFile(

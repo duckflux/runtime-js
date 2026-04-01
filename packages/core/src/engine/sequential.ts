@@ -151,6 +151,9 @@ export async function executeStep(
           output: "",
           duration: 0,
         });
+        const loopIndex = state.isInsideLoop() ? state.currentLoopIndex() : undefined;
+        const skippedSeq = state.tracer?.startStep(stepName, participant.type, undefined, loopIndex);
+        if (skippedSeq !== undefined) state.tracer?.endStep(skippedSeq, "skipped");
       }
       return chain; // Skipped steps preserve chain
     }
@@ -164,6 +167,9 @@ export async function executeStep(
     : undefined;
   const mergedWithBase = mergeChainedInput(chain, baseInput);
   const mergedInput = mergeChainedInput(mergedWithBase, overrideInput);
+
+  const loopIndex = state.isInsideLoop() ? state.currentLoopIndex() : undefined;
+  const traceSeq = state.tracer?.startStep(stepName ?? "<anonymous>", participant.type, mergedInput, loopIndex);
 
   // Set participant-scoped input in state
   state.currentInput = mergedInput;
@@ -280,6 +286,7 @@ export async function executeStep(
     // Update participant-scoped output and chain
     const outputValue = result.parsedOutput ?? result.output;
     state.currentOutput = outputValue;
+    if (traceSeq !== undefined) state.tracer?.endStep(traceSeq, result.status, outputValue, undefined, retries);
     return outputValue;
   } catch (error) {
     const message = String((error as Error)?.message ?? error);
@@ -305,6 +312,7 @@ export async function executeStep(
       if (stepName) {
         state.setResult(stepName, skipResult);
       }
+      if (traceSeq !== undefined) state.tracer?.endStep(traceSeq, "skipped", undefined, message);
       return chain; // Skipped steps preserve chain
     }
 
@@ -327,6 +335,7 @@ export async function executeStep(
           ...httpMeta,
         });
       }
+      if (traceSeq !== undefined) state.tracer?.endStep(traceSeq, "failure", undefined, message);
 
       // Execute fallback
       const fallbackResult = await executeStep(
@@ -354,6 +363,7 @@ export async function executeStep(
         ...httpMeta,
       });
     }
+    if (traceSeq !== undefined) state.tracer?.endStep(traceSeq, "failure", undefined, message);
 
     throw error;
   }

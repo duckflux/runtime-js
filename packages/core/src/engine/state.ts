@@ -1,5 +1,6 @@
 import { env } from "node:process";
 import type { StepResult } from "../model/index";
+import type { TraceCollector } from "../tracer/index";
 
 export type { StepResult };
 
@@ -25,6 +26,8 @@ export class WorkflowState {
   eventPayload: unknown;
   /** @internal Tracks ancestor workflow paths for circular sub-workflow detection */
   ancestorPaths: Set<string>;
+  /** @internal Optional trace collector; set by engine when --trace-dir is active */
+  tracer?: TraceCollector;
 
   constructor(inputs: Record<string, unknown> = {}) {
     this.inputs = { ...inputs };
@@ -80,6 +83,10 @@ export class WorkflowState {
   setLoopLast(last: boolean): void {
     const top = this.loopStack[this.loopStack.length - 1];
     if (top) top.last = last;
+  }
+
+  isInsideLoop(): boolean {
+    return this.loopStack.length > 0;
   }
 
   currentLoopContext(): { index: number; iteration: number; first: boolean; last: boolean; as?: string } {
