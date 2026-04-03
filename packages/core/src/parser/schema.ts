@@ -1,10 +1,9 @@
-import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import type { ValidationResult } from "../model/index";
+import rawSchemaJson from "./schema/duckflux.schema.json";
 
-const rawSchema = readFileSync(new URL("./schema/duckflux.schema.json", import.meta.url), "utf-8");
-const schema = JSON.parse(rawSchema) as Record<string, unknown>;
+const schema = { ...rawSchemaJson } as Record<string, unknown>;
 delete schema.$schema;
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
