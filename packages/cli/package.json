@@ -1,6 +1,6 @@
 {
   "name": "duckflux",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "type": "module",
   "description": "Declarative YAML-based workflow runner — CLI wrapper",
   "bin": {

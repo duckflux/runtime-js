@@ -322,10 +322,82 @@ jobs:
           fi
         working-directory: packages/hub-redis
 
-  # ── 8. Publish APT .deb packages ───────────────────────────────────────────
+  # ── 8. Smoke-test compiled binaries ──────────────────────────────────────────
+  # Runs each platform binary in a Docker container to verify it works before
+  # publishing to package managers. Gates apt and homebrew publishing.
+  smoke-test:
+    name: Smoke-test binaries
+    needs: release-binaries
+    if: needs.release-binaries.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - binary: quack-linux-x64
+            image: ubuntu:22.04
+            platform: linux/amd64
+          - binary: quack-linux-arm64
+            image: ubuntu:22.04
+            platform: linux/arm64
+    steps:
+      - name: Download binary from release
+        run: |
+          VERSION="${{ needs.release-binaries.outputs.version }}"
+          gh release download "v${VERSION}" \
+            --repo duckflux/runtime-js \
+            --pattern "${{ matrix.binary }}" \
+            --dir .
+          chmod +x ${{ matrix.binary }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create test workflow
+        run: |
+          cat > test.duck.yaml << 'YAML'
+          flow:
+            - type: exec
+              as: hello
+              run: echo "smoke-test-ok"
+          output: hello.output
+          YAML
+
+      - name: Set up QEMU (for arm64 emulation)
+        if: matrix.platform == 'linux/arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Run smoke tests in Docker
+        run: |
+          docker run --rm --platform ${{ matrix.platform }} \
+            -v "$PWD/${{ matrix.binary }}:/usr/local/bin/quack" \
+            -v "$PWD/test.duck.yaml:/work/test.duck.yaml" \
+            -w /work \
+            ${{ matrix.image }} \
+            bash -c '
+              set -e
+              echo "=== quack version ==="
+              quack version
+
+              echo "=== quack lint ==="
+              quack lint test.duck.yaml
+
+              echo "=== quack run ==="
+              OUTPUT=$(quack run test.duck.yaml)
+              echo "$OUTPUT"
+
+              if [ "$OUTPUT" != "smoke-test-ok" ]; then
+                echo "FAIL: unexpected output"
+                exit 1
+              fi
+
+              echo "=== All smoke tests passed ==="
+            '
+
+  # ── 9. Publish APT .deb packages ───────────────────────────────────────────
   publish-apt:
     name: Publish APT packages
-    needs: release-binaries
+    needs: [release-binaries, smoke-test]
     if: needs.release-binaries.outputs.skip == 'false'
     runs-on: ubuntu-latest
     steps:
@@ -417,10 +489,10 @@ jobs:
           git commit -m "quack v${{ needs.release-binaries.outputs.version }}"
           git push
 
-  # ── 9. Update Homebrew tap ─────────────────────────────────────────────────
+  # ── 10. Update Homebrew tap ────────────────────────────────────────────────
   publish-homebrew:
     name: Update Homebrew tap
-    needs: release-binaries
+    needs: [release-binaries, smoke-test]
     if: needs.release-binaries.outputs.skip == 'false'
     runs-on: ubuntu-latest
     steps:
