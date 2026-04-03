@@ -1,10 +1,10 @@
 {
   "name": "duckflux",
-  "version": "0.6.8",
+  "version": "0.7.0",
   "type": "module",
   "description": "Declarative YAML-based workflow runner — CLI wrapper",
   "bin": {
-    "duckflux": "bin/duckflux.js"
+    "quack": "bin/quack.js"
   },
   "files": [
     "bin"

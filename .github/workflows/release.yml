@@ -169,6 +169,9 @@ jobs:
       needs.detect-changes.outputs.core == 'true' ||
       needs.detect-changes.outputs.runner == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version-check.outputs.version }}
+      skip: ${{ steps.version-check.outputs.skip }}
     permissions:
       contents: write
     steps:
@@ -204,9 +207,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version-check.outputs.version }}
-          name: "duckflux JS runtime v${{ steps.version-check.outputs.version }}"
+          name: "quack v${{ steps.version-check.outputs.version }}"
           body: |
-            ## duckflux JS runtime v${{ steps.version-check.outputs.version }}
+            ## quack v${{ steps.version-check.outputs.version }}
 
             ### Standalone binaries (no Bun/Node required)
 
@@ -214,11 +217,11 @@ jobs:
 
             | Platform | File |
             |---|---|
-            | Linux x64 | `duckflux-linux-x64` |
-            | Linux ARM64 | `duckflux-linux-arm64` |
-            | macOS x64 | `duckflux-darwin-x64` |
-            | macOS ARM64 | `duckflux-darwin-arm64` |
-            | Windows x64 | `duckflux-windows-x64.exe` |
+            | Linux x64 | `quack-linux-x64` |
+            | Linux ARM64 | `quack-linux-arm64` |
+            | macOS x64 | `quack-darwin-x64` |
+            | macOS ARM64 | `quack-darwin-arm64` |
+            | Windows x64 | `quack-windows-x64.exe` |
 
             ### via npm / npx
 
@@ -230,6 +233,19 @@ jobs:
             Or install globally:
             ```sh
             npm install -g duckflux
+            quack run workflow.yaml
+            ```
+
+            ### via Homebrew
+
+            ```sh
+            brew install duckflux/tap/quack
+            ```
+
+            ### via APT (Debian/Ubuntu)
+
+            ```sh
+            curl -fsSL https://duckflux.github.io/apt-repo/install.sh | bash
             ```
           files: packages/runner/bin/*
           fail_on_unmatched_files: true
@@ -305,3 +321,172 @@ jobs:
             npm publish --access public --ignore-scripts
           fi
         working-directory: packages/hub-redis
+
+  # ── 8. Publish APT .deb packages ───────────────────────────────────────────
+  publish-apt:
+    name: Publish APT packages
+    needs: release-binaries
+    if: needs.release-binaries.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nfpm
+        run: |
+          echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | sudo tee /etc/apt/sources.list.d/goreleaser.list
+          sudo apt-get update
+          sudo apt-get install -y nfpm
+
+      - name: Download linux binaries from release
+        run: |
+          VERSION="${{ needs.release-binaries.outputs.version }}"
+          gh release download "v${VERSION}" \
+            --pattern "quack-linux-*" \
+            --dir packages/runner/bin
+          chmod +x packages/runner/bin/quack-linux-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build .deb packages
+        run: |
+          VERSION="${{ needs.release-binaries.outputs.version }}"
+          cd packages/runner
+
+          # amd64
+          VERSION="${VERSION}" NFPM_ARCH=amd64 BIN_ARCH=x64 \
+            nfpm package --packager deb --target "duckflux_${VERSION}_amd64.deb"
+
+          # arm64
+          VERSION="${VERSION}" NFPM_ARCH=arm64 BIN_ARCH=arm64 \
+            nfpm package --packager deb --target "duckflux_${VERSION}_arm64.deb"
+
+      - name: Clone apt-repo
+        run: |
+          git clone "https://x-access-token:${{ secrets.GH_PAT }}@github.com/duckflux/apt-repo.git" apt-repo
+
+      - name: Update APT repository
+        run: |
+          VERSION="${{ needs.release-binaries.outputs.version }}"
+
+          # Copy .deb packages
+          cp packages/runner/duckflux_${VERSION}_amd64.deb apt-repo/pool/main/
+          cp packages/runner/duckflux_${VERSION}_arm64.deb apt-repo/pool/main/
+
+          cd apt-repo
+
+          # Ensure directory structure
+          mkdir -p dists/stable/main/binary-amd64
+          mkdir -p dists/stable/main/binary-arm64
+
+          # Regenerate package indices
+          dpkg-scanpackages --arch amd64 pool/ > dists/stable/main/binary-amd64/Packages
+          gzip -k -f dists/stable/main/binary-amd64/Packages
+
+          dpkg-scanpackages --arch arm64 pool/ > dists/stable/main/binary-arm64/Packages
+          gzip -k -f dists/stable/main/binary-arm64/Packages
+
+          # Generate Release file
+          apt-ftparchive release dists/stable/ > dists/stable/Release
+
+      - name: Import GPG key and sign
+        run: |
+          cd apt-repo
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --import --batch 2>/dev/null
+
+          # Detached signature
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+            -abs -o dists/stable/Release.gpg dists/stable/Release
+
+          # Cleartext signed
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+            --clearsign -o dists/stable/InRelease dists/stable/Release
+
+          # Export public key
+          gpg --armor --export > dists/stable/Release.gpg.key
+
+      - name: Push to apt-repo
+        run: |
+          cd apt-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "quack v${{ needs.release-binaries.outputs.version }}"
+          git push
+
+  # ── 9. Update Homebrew tap ─────────────────────────────────────────────────
+  publish-homebrew:
+    name: Update Homebrew tap
+    needs: release-binaries
+    if: needs.release-binaries.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download binaries and compute checksums
+        run: |
+          VERSION="${{ needs.release-binaries.outputs.version }}"
+          gh release download "v${VERSION}" \
+            --repo duckflux/runtime-js \
+            --pattern "quack-darwin-*" \
+            --pattern "quack-linux-*" \
+            --dir binaries
+          echo "SHA_DARWIN_ARM64=$(sha256sum binaries/quack-darwin-arm64 | cut -d' ' -f1)" >> $GITHUB_ENV
+          echo "SHA_DARWIN_X64=$(sha256sum binaries/quack-darwin-x64 | cut -d' ' -f1)" >> $GITHUB_ENV
+          echo "SHA_LINUX_ARM64=$(sha256sum binaries/quack-linux-arm64 | cut -d' ' -f1)" >> $GITHUB_ENV
+          echo "SHA_LINUX_X64=$(sha256sum binaries/quack-linux-x64 | cut -d' ' -f1)" >> $GITHUB_ENV
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clone homebrew-tap
+        run: |
+          git clone "https://x-access-token:${{ secrets.GH_PAT }}@github.com/duckflux/homebrew-tap.git" homebrew-tap
+
+      - name: Generate formula
+        run: |
+          VERSION="${{ needs.release-binaries.outputs.version }}"
+          cat > homebrew-tap/Formula/quack.rb << FORMULA
+          class Quack < Formula
+            desc "Declarative YAML-based workflow runner"
+            homepage "https://github.com/duckflux/runtime-js"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/duckflux/runtime-js/releases/download/v${VERSION}/quack-darwin-arm64"
+                sha256 "${SHA_DARWIN_ARM64}"
+              else
+                url "https://github.com/duckflux/runtime-js/releases/download/v${VERSION}/quack-darwin-x64"
+                sha256 "${SHA_DARWIN_X64}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/duckflux/runtime-js/releases/download/v${VERSION}/quack-linux-arm64"
+                sha256 "${SHA_LINUX_ARM64}"
+              else
+                url "https://github.com/duckflux/runtime-js/releases/download/v${VERSION}/quack-linux-x64"
+                sha256 "${SHA_LINUX_X64}"
+              end
+            end
+
+            def install
+              bin.install Dir["quack-*"].first => "quack"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/quack version")
+            end
+          end
+          FORMULA
+
+      - name: Push formula update
+        run: |
+          cd homebrew-tap
+          git rm -f Formula/runner.rb 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/quack.rb
+          git commit -m "quack v${{ needs.release-binaries.outputs.version }}"
+          git push

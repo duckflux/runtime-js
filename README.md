@@ -9,7 +9,7 @@ Spec version: **v0.7**
 | Package | Description |
 |---------|-------------|
 | `@duckflux/core` | Engine, parser, CEL, event hub (in-memory) |
-| `@duckflux/runner` | CLI tool (`duckflux run`, `duckflux lint`, `duckflux validate`) |
+| `@duckflux/runner` | CLI tool (`quack run`, `quack lint`, `quack validate`) |
 | `@duckflux/hub-nats` | Optional NATS JetStream event hub backend |
 | `@duckflux/hub-redis` | Optional Redis Streams event hub backend |
 
@@ -31,20 +31,20 @@ bun add @duckflux/hub-redis
 
 ```bash
 # Run a workflow
-duckflux run workflow.yaml
-duckflux run workflow.yaml --input name=World --input count=3
-duckflux run workflow.yaml --input-file inputs.json
-duckflux run workflow.yaml --cwd /path/to/workdir
-cat inputs.json | duckflux run workflow.yaml
+quack run workflow.yaml
+quack run workflow.yaml --input name=World --input count=3
+quack run workflow.yaml --input-file inputs.json
+quack run workflow.yaml --cwd /path/to/workdir
+cat inputs.json | quack run workflow.yaml
 
 # Validate (schema + semantics)
-duckflux lint workflow.yaml
+quack lint workflow.yaml
 
 # Validate with inputs
-duckflux validate workflow.yaml --input name=World
+quack validate workflow.yaml --input name=World
 
 # Print version
-duckflux version
+quack version
 ```
 
 ### Input Precedence
@@ -54,9 +54,9 @@ duckflux version
 ### Event Hub Flags
 
 ```bash
-duckflux run workflow.yaml --event-backend memory   # default (in-memory MemoryHub)
-duckflux run workflow.yaml --event-backend nats --nats-url nats://localhost:4222
-duckflux run workflow.yaml --event-backend redis --redis-addr localhost:6379
+quack run workflow.yaml --event-backend memory   # default (in-memory MemoryHub)
+quack run workflow.yaml --event-backend nats --nats-url nats://localhost:4222
+quack run workflow.yaml --event-backend redis --redis-addr localhost:6379
 ```
 
 ## Library Usage

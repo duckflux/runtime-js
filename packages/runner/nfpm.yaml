@@ -1,0 +1,13 @@
+name: duckflux
+arch: "${NFPM_ARCH}"
+platform: linux
+version: "${VERSION}"
+maintainer: "duckflux <hello@duckflux.dev>"
+description: "Declarative YAML-based workflow runner"
+homepage: "https://github.com/duckflux/runtime-js"
+license: "MIT"
+contents:
+  - src: "bin/quack-linux-${BIN_ARCH}"
+    dst: /usr/local/bin/quack
+    file_info:
+      mode: 0755

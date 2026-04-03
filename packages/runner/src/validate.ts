@@ -8,7 +8,7 @@ type CLIValues = Record<string, any> | undefined;
 
 export default async function validateCommand(filePath?: string, cliValues?: CLIValues): Promise<number> {
   if (!filePath) {
-    console.error("Usage: duckflux validate <workflow.yaml> [--input k=v] [--input-file file.json]");
+    console.error("Usage: quack validate <workflow.yaml> [--input k=v] [--input-file file.json]");
     return 1;
   }
 

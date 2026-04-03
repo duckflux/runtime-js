@@ -133,7 +133,7 @@ function collectSetKeys(step: unknown): string[] {
 
 export default async function lintCommand(filePath?: string): Promise<number> {
   if (!filePath) {
-    console.error("Usage: duckflux lint <workflow.yaml>");
+    console.error("Usage: quack lint <workflow.yaml>");
     return 1;
   }
 

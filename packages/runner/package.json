@@ -1,9 +1,9 @@
 {
   "name": "@duckflux/runner",
-  "version": "0.6.8",
+  "version": "0.7.0",
   "type": "module",
   "bin": {
-    "duckflux": "dist/main.js"
+    "quack": "dist/main.js"
   },
   "exports": {
     ".": "./dist/index.js",
@@ -17,11 +17,11 @@
     "build": "bun build src/main.ts --outdir dist --target node --format esm --banner '#!/usr/bin/env node' && tsc --project tsconfig.build.json",
     "postbuild": "chmod +x dist/main.js",
     "prepublishOnly": "bun run build",
-    "compile:linux-x64": "bun build --compile --target=bun-linux-x64 src/main.ts --outfile bin/duckflux-linux-x64",
-    "compile:linux-arm64": "bun build --compile --target=bun-linux-arm64 src/main.ts --outfile bin/duckflux-linux-arm64",
-    "compile:darwin-x64": "bun build --compile --target=bun-darwin-x64 src/main.ts --outfile bin/duckflux-darwin-x64",
-    "compile:darwin-arm64": "bun build --compile --target=bun-darwin-arm64 src/main.ts --outfile bin/duckflux-darwin-arm64",
-    "compile:windows-x64": "bun build --compile --target=bun-windows-x64 src/main.ts --outfile bin/duckflux-windows-x64.exe",
+    "compile:linux-x64": "bun build --compile --target=bun-linux-x64 src/main.ts --outfile bin/quack-linux-x64",
+    "compile:linux-arm64": "bun build --compile --target=bun-linux-arm64 src/main.ts --outfile bin/quack-linux-arm64",
+    "compile:darwin-x64": "bun build --compile --target=bun-darwin-x64 src/main.ts --outfile bin/quack-darwin-x64",
+    "compile:darwin-arm64": "bun build --compile --target=bun-darwin-arm64 src/main.ts --outfile bin/quack-darwin-arm64",
+    "compile:windows-x64": "bun build --compile --target=bun-windows-x64 src/main.ts --outfile bin/quack-windows-x64.exe",
     "compile": "bun run compile:linux-x64 && bun run compile:linux-arm64 && bun run compile:darwin-x64 && bun run compile:darwin-arm64 && bun run compile:windows-x64"
   },
   "dependencies": {

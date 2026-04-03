@@ -73,7 +73,7 @@ function parseInputFlags(arr: string[] | undefined): Record<string, unknown> {
 
 export default async function runCommand(filePath?: string, cliValues?: CLIValues): Promise<number> {
   if (!filePath) {
-    console.error("Usage: duckflux run <workflow.yaml> [--input k=v] [--input-file file.json] [--cwd dir]");
+    console.error("Usage: quack run <workflow.yaml> [--input k=v] [--input-file file.json] [--cwd dir]");
     return 1;
   }
 
