@@ -3,6 +3,7 @@ name: CI Release
 on:
   push:
     branches: [main]
+  workflow_dispatch: {}
 
 jobs:
   # ── 1. Detect which packages changed ────────────────────────────────────────
@@ -201,6 +202,13 @@ jobs:
         if: steps.version-check.outputs.skip == 'false'
         run: bun run compile
         working-directory: packages/runner
+
+      - name: Generate SHA256SUMS
+        if: steps.version-check.outputs.skip == 'false'
+        run: |
+          cd packages/runner/bin
+          sha256sum quack-linux-x64 quack-linux-arm64 quack-darwin-x64 quack-darwin-arm64 quack-windows-x64.exe > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create GitHub Release and upload binaries
         if: steps.version-check.outputs.skip == 'false'
